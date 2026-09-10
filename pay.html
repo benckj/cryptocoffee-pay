@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>CryptoCoffee — pay</title>
 <style>
   :root {
@@ -10,28 +10,39 @@
     --copper: #e2924f; --success: #6fb98f; --warn: #d97757; --border: #332a20;
   }
   * { box-sizing: border-box; }
+  html {
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
     font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    padding: 2rem 1.5rem; display: grid; gap: 1.2rem; max-width: 480px; margin-inline: auto;
+    padding: 2rem 1.5rem; display: grid; gap: 1.2rem;
+    width: 100%; max-width: 480px; margin-inline: auto;
     min-height: 100vh; align-content: start;
+    overflow-x: hidden; overflow-wrap: anywhere;
   }
   h1 { font-size: 1.2rem; margin: 0 0 0.2rem; }
   .amount { font-size: 1.6rem; color: var(--copper); font-weight: 600; }
   .card {
     background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
     padding: 1.2rem 1.3rem; display: grid; gap: 0.6rem;
+    min-width: 0;
   }
-  .row { display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--ink-dim); gap: 1rem; }
-  .row b { color: var(--ink); font-weight: 500; word-break: break-all; text-align: right; }
+  .row { display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--ink-dim); gap: 1rem; min-width: 0; }
+  .row b { color: var(--ink); font-weight: 500; overflow-wrap: anywhere; word-break: break-word; text-align: right; min-width: 0; }
   button {
     font: inherit; font-size: 1rem; padding: 0.9rem 1rem; border-radius: 10px;
     border: 1px solid var(--copper); background: transparent; color: var(--copper);
-    cursor: pointer; font-weight: 600;
+    cursor: pointer; font-weight: 600; max-width: 100%;
   }
   button:disabled { opacity: 0.5; cursor: default; }
   button.link { display: block; text-align: center; text-decoration: none; }
-  #status { font-size: 0.9rem; line-height: 1.5; white-space: pre-wrap; }
+  #status {
+    font-size: 0.9rem; line-height: 1.5; white-space: pre-wrap;
+    overflow-wrap: anywhere; word-break: break-word; max-width: 100%;
+  }
   #status.ok { color: var(--success); }
   #status.err { color: var(--warn); }
   a { color: var(--copper); }
@@ -79,7 +90,21 @@ function fmtAmount(wei) {
 
 function shortHex(v) {
   if (!v) return "—";
-  return v.length > 12 ? v.slice(0, 10) + "…" : v;
+  v = String(v);
+  return v.length > 12 ? v.slice(0, 10) + "…" + v.slice(-4) : v;
+}
+
+function friendlyError(err) {
+  if (!err) return "Unknown error";
+  var reason = err.reason || (err.error && err.error.message);
+  if (reason && reason !== "execution reverted") return String(reason);
+  var msg = err.message ? String(err.message) : String(err);
+  var cut = msg.search(/\s*\[ See:/);
+  if (cut > 0) msg = msg.slice(0, cut).trim();
+  cut = msg.search(/\s*\(reason=/);
+  if (cut > 0) msg = msg.slice(0, cut).trim();
+  if (msg.length > 160) msg = msg.slice(0, 157) + "…";
+  return msg;
 }
 
 function renderInvoice() {
@@ -206,17 +231,17 @@ async function pay() {
 
     setStatus("Confirm the transaction in your wallet...");
     const tx = await contract.payForSession(SESSION_ID, MACHINE_ID, AMOUNT, DEADLINE, { value: AMOUNT });
-    setStatus("Submitted: " + tx.hash + "\nWaiting for confirmation...");
+    setStatus("Submitted " + shortHex(tx.hash) + "\nWaiting for confirmation…");
 
     const receipt = await tx.wait();
     if (receipt.status === 1) {
-      setStatus("Paid! tx " + tx.hash + "\nGo back to the kiosk screen.", "ok");
+      setStatus("Paid. Go back to the kiosk.\n" + shortHex(tx.hash), "ok");
     } else {
-      setStatus("Transaction reverted on-chain: " + tx.hash, "err");
+      setStatus("Transaction reverted on-chain: " + shortHex(tx.hash), "err");
       payBtn.disabled = false;
     }
   } catch (err) {
-    setStatus("Error: " + (err && err.message ? err.message : String(err)), "err");
+    setStatus("Error: " + friendlyError(err), "err");
     payBtn.disabled = false;
   }
 }
