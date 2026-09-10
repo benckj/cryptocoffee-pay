@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CryptoCoffee — pay</title>
+<style>
+  :root {
+    --bg: #17130f; --panel: #1f1a15; --ink: #f3ede4; --ink-dim: #a89a89;
+    --copper: #e2924f; --success: #6fb98f; --warn: #d97757; --border: #332a20;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    padding: 2rem 1.5rem; display: grid; gap: 1.2rem; max-width: 480px; margin-inline: auto;
+    min-height: 100vh; align-content: start;
+  }
+  h1 { font-size: 1.2rem; margin: 0 0 0.2rem; }
+  .amount { font-size: 1.6rem; color: var(--copper); font-weight: 600; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1.2rem 1.3rem; display: grid; gap: 0.6rem;
+  }
+  .row { display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--ink-dim); gap: 1rem; }
+  .row b { color: var(--ink); font-weight: 500; word-break: break-all; text-align: right; }
+  button {
+    font: inherit; font-size: 1rem; padding: 0.9rem 1rem; border-radius: 10px;
+    border: 1px solid var(--copper); background: transparent; color: var(--copper);
+    cursor: pointer; font-weight: 600;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button.link { display: block; text-align: center; text-decoration: none; }
+  #status { font-size: 0.9rem; line-height: 1.5; white-space: pre-wrap; }
+  #status.ok { color: var(--success); }
+  #status.err { color: var(--warn); }
+  a { color: var(--copper); }
+</style>
+</head>
+<body>
+  <h1>CryptoCoffee — pay for your session</h1>
+  <div class="card">
+    <div class="row"><span>Amount</span><b id="amountDisplay">—</b></div>
+    <div class="row"><span>Machine</span><b id="machineDisplay">—</b></div>
+    <div class="row"><span>Session</span><b id="sessionDisplay">—</b></div>
+  </div>
+
+  <div id="noWallet" class="card" hidden>
+    <p>No wallet detected in this browser. Open this page inside MetaMask's own
+       browser instead — tap below (this relaunches the same link inside MetaMask,
+       where it can actually submit the transaction):</p>
+    <a id="mmLink" class="link" href="#"><button>Open in MetaMask</button></a>
+  </div>
+
+  <button id="payBtn" hidden>Pay now</button>
+  <div id="status"></div>
+
+<script src="vendor/ethers.umd.min.js"></script>
+<script>
+// Professor's pay page (merged/ui/www/pay.html): MetaMask Mobile drops a
+// custom 4-arg ethereum: URI, so this page builds payForSession via ethers
+// inside a wallet-injected browser. ABI is THIS repo's uint64 deadline,
+// not the professor contract's uint256.
+const params = new URLSearchParams(location.search);
+let CONTRACT = params.get("contract");
+let CHAIN_ID = parseInt(params.get("chainId"), 10);
+let SESSION_ID = params.get("sessionId");
+let MACHINE_ID = params.get("machineId");
+let AMOUNT = params.get("amount");
+let DEADLINE = params.get("deadline");
+let WALLET_RPC = params.get("rpc") || "";
+let MACHINE_LABEL = "";
+
+const ABI = ["function payForSession(bytes32 sessionId, bytes32 machineId, uint256 expectedAmount, uint64 deadline) external payable"];
+
+function fmtAmount(wei) {
+  try { return ethers.utils.formatEther(wei) + " UZHETH"; } catch { return wei + " wei"; }
+}
+
+function shortHex(v) {
+  if (!v) return "—";
+  return v.length > 12 ? v.slice(0, 10) + "…" : v;
+}
+
+function renderInvoice() {
+  document.getElementById("amountDisplay").textContent = AMOUNT ? fmtAmount(AMOUNT) : "—";
+  document.getElementById("machineDisplay").textContent = MACHINE_LABEL || shortHex(MACHINE_ID);
+  document.getElementById("sessionDisplay").textContent = shortHex(SESSION_ID);
+}
+
+const statusEl = document.getElementById("status");
+function setStatus(text, cls) {
+  statusEl.textContent = text;
+  statusEl.className = cls || "";
+}
+
+function invoiceReady() {
+  return CONTRACT && SESSION_ID && MACHINE_ID && AMOUNT && DEADLINE && CHAIN_ID;
+}
+
+function applyWalletConnect(wc) {
+  CONTRACT = wc.contract;
+  CHAIN_ID = parseInt(wc.chain_id, 10);
+  SESSION_ID = wc.session_id_hex;
+  MACHINE_ID = wc.machine_id_hex;
+  MACHINE_LABEL = wc.machine_id || "";
+  AMOUNT = String(wc.amount);
+  DEADLINE = String(wc.deadline);
+  WALLET_RPC = wc.wallet_rpc_url || WALLET_RPC;
+}
+
+function parseEip681(uri) {
+  if (!uri || uri.indexOf("ethereum:") !== 0) return false;
+  var addr = uri.split(":")[1].split("@")[0];
+  var chainId = parseInt(uri.split("@")[1].split("/")[0], 10);
+  var qs = uri.slice(uri.indexOf("?") + 1).split("&");
+  var b32 = [], out = {};
+  qs.forEach(function (kv) {
+    var i = kv.indexOf("="), k = kv.slice(0, i), v = kv.slice(i + 1);
+    if (k === "bytes32") b32.push(v); else out[k] = v;
+  });
+  if (b32.length < 2 || !out.uint256 || !out.uint64) return false;
+  CONTRACT = addr;
+  CHAIN_ID = chainId;
+  SESSION_ID = b32[0];
+  MACHINE_ID = b32[1];
+  AMOUNT = out.value || out.uint256;
+  DEADLINE = out.uint64;
+  return true;
+}
+
+function showPayOrWalletPrompt() {
+  renderInvoice();
+  if (!invoiceReady()) {
+    setStatus("Waiting for an invoice on the kiosk — tap a drink there, then come back.", "err");
+    return;
+  }
+  if (!window.ethereum) {
+    document.getElementById("noWallet").hidden = false;
+    document.getElementById("payBtn").hidden = true;
+    const deepLink = "https://metamask.app.link/dapp/" + location.host + location.pathname + location.search;
+    document.getElementById("mmLink").href = deepLink;
+    setStatus("");
+  } else {
+    document.getElementById("noWallet").hidden = true;
+    document.getElementById("payBtn").hidden = false;
+    setStatus("");
+  }
+}
+
+async function loadFromKiosk() {
+  if (invoiceReady()) return true;
+  try {
+    const r = await fetch("status.json?_=" + Date.now(), { cache: "no-store" });
+    const data = await r.json();
+    if (data.status !== "awaiting_payment") return false;
+    if (data.wallet_connect) applyWalletConnect(data.wallet_connect);
+    else if (data.payment_uri) parseEip681(data.payment_uri);
+    return invoiceReady();
+  } catch (e) {
+    return false;
+  }
+}
+
+async function ensureChain(provider) {
+  const network = await provider.getNetwork();
+  if (network.chainId === CHAIN_ID) return;
+  const hexChainId = "0x" + CHAIN_ID.toString(16);
+  try {
+    await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: hexChainId }] });
+  } catch (switchErr) {
+    if (switchErr.code === 4902 && WALLET_RPC) {
+      await window.ethereum.request({
+        method: "wallet_addEthereumChain",
+        params: [{
+          chainId: hexChainId,
+          chainName: "UZH Ethereum PoS",
+          rpcUrls: [WALLET_RPC],
+          nativeCurrency: { name: "UZHETHs", symbol: "UZHETHs", decimals: 18 },
+        }],
+      });
+    } else {
+      throw switchErr;
+    }
+  }
+}
+
+async function pay() {
+  const payBtn = document.getElementById("payBtn");
+  payBtn.disabled = true;
+  try {
+    if (!invoiceReady()) {
+      await loadFromKiosk();
+    }
+    if (!invoiceReady()) {
+      setStatus("No live invoice — tap a drink on the kiosk first.", "err");
+      payBtn.disabled = false;
+      return;
+    }
+    setStatus("Connecting wallet...");
+    const provider = new ethers.providers.Web3Provider(window.ethereum, "any");
+    await provider.send("eth_requestAccounts", []);
+    await ensureChain(provider);
+    const signer = provider.getSigner();
+    const contract = new ethers.Contract(CONTRACT, ABI, signer);
+
+    setStatus("Confirm the transaction in your wallet...");
+    const tx = await contract.payForSession(SESSION_ID, MACHINE_ID, AMOUNT, DEADLINE, { value: AMOUNT });
+    setStatus("Submitted: " + tx.hash + "\nWaiting for confirmation...");
+
+    const receipt = await tx.wait();
+    if (receipt.status === 1) {
+      setStatus("Paid! tx " + tx.hash + "\nGo back to the kiosk screen.", "ok");
+    } else {
+      setStatus("Transaction reverted on-chain: " + tx.hash, "err");
+      payBtn.disabled = false;
+    }
+  } catch (err) {
+    setStatus("Error: " + (err && err.message ? err.message : String(err)), "err");
+    payBtn.disabled = false;
+  }
+}
+
+document.getElementById("payBtn").addEventListener("click", pay);
+
+(async function init() {
+  if (!invoiceReady()) {
+    setStatus("Looking up the kiosk invoice…");
+    await loadFromKiosk();
+  }
+  showPayOrWalletPrompt();
+  if (!invoiceReady()) {
+    setInterval(async function () {
+      if (invoiceReady()) return;
+      if (await loadFromKiosk()) showPayOrWalletPrompt();
+    }, 700);
+  }
+})();
+</script>
+</body>
+</html>
