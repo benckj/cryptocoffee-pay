@@ -23,7 +23,20 @@
     min-height: 100vh; align-content: start;
     overflow-x: hidden; overflow-wrap: anywhere;
   }
-  h1 { font-size: 1.2rem; margin: 0 0 0.2rem; }
+  header {
+    display: grid;
+    gap: 0.55rem;
+    justify-items: center;
+    text-align: center;
+  }
+  h1 { font-size: 1.2rem; margin: 0; }
+  .brand-logo {
+    display: block;
+    width: min(9rem, 46vw);
+    height: auto;
+    aspect-ratio: 1;
+    object-fit: contain;
+  }
   .amount { font-size: 1.6rem; color: var(--copper); font-weight: 600; }
   .card {
     background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
@@ -49,7 +62,10 @@
 </style>
 </head>
 <body>
-  <h1>CryptoCoffee — pay for your session</h1>
+  <header>
+    <img class="brand-logo" src="assets/bcc-logo.svg" alt="UZH Blockchain Center" width="2126" height="2126">
+    <h1>CryptoCoffee — pay for your session</h1>
+  </header>
   <div class="card">
     <div class="row"><span>Amount</span><b id="amountDisplay">—</b></div>
     <div class="row"><span>Machine</span><b id="machineDisplay">—</b></div>
