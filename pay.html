@@ -59,6 +59,7 @@
   #status.ok { color: var(--success); }
   #status.err { color: var(--warn); }
   a { color: var(--copper); }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
@@ -176,13 +177,42 @@ function parseEip681(uri) {
   return true;
 }
 
+// MetaMask Mobile's in-app browser often injects window.ethereum *after*
+// this script has already run, so a one-shot check would leave the
+// "no wallet" card up even though we are already inside MetaMask.
+let ETH = null;
+
+function looksLikeMetaMaskBrowser() {
+  try { return /MetaMask/i.test(navigator.userAgent || ""); } catch (e) { return false; }
+}
+
+function injectedProvider() {
+  if (ETH) return ETH;
+  var eth = window.ethereum;
+  if (!eth) return null;
+  if (eth.providers && eth.providers.length) {
+    for (var i = 0; i < eth.providers.length; i++) {
+      if (eth.providers[i] && eth.providers[i].isMetaMask) return eth.providers[i];
+    }
+    return eth.providers[0];
+  }
+  return eth;
+}
+
+function rememberProvider(p) {
+  if (p) ETH = p;
+}
+
 function showPayOrWalletPrompt() {
   renderInvoice();
   if (!invoiceReady()) {
     setStatus("Waiting for an invoice on the kiosk — tap a drink there, then come back.", "err");
     return;
   }
-  if (!window.ethereum) {
+  var eth = injectedProvider();
+  if (eth) rememberProvider(eth);
+  var inMetaMask = !!eth || looksLikeMetaMaskBrowser();
+  if (!inMetaMask) {
     document.getElementById("noWallet").hidden = false;
     document.getElementById("payBtn").hidden = true;
     const deepLink = "https://metamask.app.link/dapp/" + location.host + location.pathname + location.search;
@@ -191,8 +221,56 @@ function showPayOrWalletPrompt() {
   } else {
     document.getElementById("noWallet").hidden = true;
     document.getElementById("payBtn").hidden = false;
-    setStatus("");
+    setStatus(eth ? "" : "Connecting to MetaMask…");
   }
+}
+
+function watchForWallet() {
+  function onFound(p) {
+    rememberProvider(p || injectedProvider());
+    showPayOrWalletPrompt();
+  }
+  window.addEventListener("ethereum#initialized", function () { onFound(window.ethereum); }, { once: true });
+  window.addEventListener("eip6963:announceProvider", function (event) {
+    var d = event.detail || {};
+    onFound(d.provider);
+  });
+  try { window.dispatchEvent(new Event("eip6963:requestProvider")); } catch (e) {}
+  if (injectedProvider()) {
+    onFound(injectedProvider());
+    return;
+  }
+  var n = 0;
+  var t = setInterval(function () {
+    n += 1;
+    if (injectedProvider()) {
+      clearInterval(t);
+      onFound(injectedProvider());
+    } else if (n >= 50) {
+      clearInterval(t);
+    }
+  }, 200);
+}
+
+function waitForProvider(ms) {
+  var already = injectedProvider();
+  if (already) return Promise.resolve(already);
+  return new Promise(function (resolve) {
+    var done = false;
+    function finish() {
+      if (done) return;
+      done = true;
+      resolve(injectedProvider());
+    }
+    window.addEventListener("ethereum#initialized", finish, { once: true });
+    var started = Date.now();
+    var t = setInterval(function () {
+      if (injectedProvider() || Date.now() - started >= ms) {
+        clearInterval(t);
+        finish();
+      }
+    }, 100);
+  });
 }
 
 async function loadFromKiosk() {
@@ -213,11 +291,13 @@ async function ensureChain(provider) {
   const network = await provider.getNetwork();
   if (network.chainId === CHAIN_ID) return;
   const hexChainId = "0x" + CHAIN_ID.toString(16);
+  var eth = injectedProvider();
+  if (!eth) throw new Error("MetaMask is not connected.");
   try {
-    await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: hexChainId }] });
+    await eth.request({ method: "wallet_switchEthereumChain", params: [{ chainId: hexChainId }] });
   } catch (switchErr) {
     if (switchErr.code === 4902 && WALLET_RPC) {
-      await window.ethereum.request({
+      await eth.request({
         method: "wallet_addEthereumChain",
         params: [{
           chainId: hexChainId,
@@ -245,7 +325,14 @@ async function pay() {
       return;
     }
     setStatus("Connecting wallet...");
-    const provider = new ethers.providers.Web3Provider(window.ethereum, "any");
+    var eth = injectedProvider() || await waitForProvider(8000);
+    if (!eth) {
+      setStatus("MetaMask did not connect. Reload this page inside MetaMask.", "err");
+      payBtn.disabled = false;
+      return;
+    }
+    rememberProvider(eth);
+    const provider = new ethers.providers.Web3Provider(eth, "any");
     await provider.send("eth_requestAccounts", []);
     await ensureChain(provider);
     const signer = provider.getSigner();
@@ -276,6 +363,7 @@ document.getElementById("payBtn").addEventListener("click", pay);
     await loadFromKiosk();
   }
   showPayOrWalletPrompt();
+  watchForWallet();
   if (!invoiceReady()) {
     setInterval(async function () {
       if (invoiceReady()) return;
