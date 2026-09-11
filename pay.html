@@ -68,6 +68,7 @@
   </header>
   <div class="card">
     <div class="row"><span>Amount</span><b id="amountDisplay">—</b></div>
+    <div class="row"><span>Network</span><b id="networkDisplay">—</b></div>
     <div class="row"><span>Machine</span><b id="machineDisplay">—</b></div>
     <div class="row"><span>Session</span><b id="sessionDisplay">—</b></div>
   </div>
@@ -96,12 +97,14 @@ let MACHINE_ID = params.get("machineId");
 let AMOUNT = params.get("amount");
 let DEADLINE = params.get("deadline");
 let WALLET_RPC = params.get("rpc") || "";
+let CHAIN_NAME = params.get("chainName") || "UZH Ethereum PoS";
+let COIN_SYMBOL = params.get("symbol") || "UZHETHs";
 let MACHINE_LABEL = "";
 
 const ABI = ["function payForSession(bytes32 sessionId, bytes32 machineId, uint256 expectedAmount, uint64 deadline) external payable"];
 
 function fmtAmount(wei) {
-  try { return ethers.utils.formatEther(wei) + " UZHETH"; } catch { return wei + " wei"; }
+  try { return ethers.utils.formatEther(wei) + " " + COIN_SYMBOL; } catch { return wei + " wei"; }
 }
 
 function shortHex(v) {
@@ -125,6 +128,7 @@ function friendlyError(err) {
 
 function renderInvoice() {
   document.getElementById("amountDisplay").textContent = AMOUNT ? fmtAmount(AMOUNT) : "—";
+  document.getElementById("networkDisplay").textContent = invoiceReady() ? CHAIN_NAME : "—";
   document.getElementById("machineDisplay").textContent = MACHINE_LABEL || shortHex(MACHINE_ID);
   document.getElementById("sessionDisplay").textContent = shortHex(SESSION_ID);
 }
@@ -148,6 +152,8 @@ function applyWalletConnect(wc) {
   AMOUNT = String(wc.amount);
   DEADLINE = String(wc.deadline);
   WALLET_RPC = wc.wallet_rpc_url || WALLET_RPC;
+  if (wc.chain_name) CHAIN_NAME = wc.chain_name;
+  if (wc.native_symbol) COIN_SYMBOL = wc.native_symbol;
 }
 
 function parseEip681(uri) {
@@ -215,9 +221,9 @@ async function ensureChain(provider) {
         method: "wallet_addEthereumChain",
         params: [{
           chainId: hexChainId,
-          chainName: "UZH Ethereum PoS",
+          chainName: CHAIN_NAME,
           rpcUrls: [WALLET_RPC],
-          nativeCurrency: { name: "UZHETHs", symbol: "UZHETHs", decimals: 18 },
+          nativeCurrency: { name: COIN_SYMBOL, symbol: COIN_SYMBOL, decimals: 18 },
         }],
       });
     } else {
