@@ -50,6 +50,9 @@
     border: 1px solid var(--copper); background: transparent; color: var(--copper);
     cursor: pointer; font-weight: 600; max-width: 100%;
   }
+  button.primary {
+    background: var(--copper); border-color: var(--copper); color: #17130f;
+  }
   button:disabled { opacity: 0.5; cursor: default; }
   button.link { display: block; text-align: center; text-decoration: none; }
   #status {
@@ -74,14 +77,12 @@
     <div class="row"><span>Session</span><b id="sessionDisplay">—</b></div>
   </div>
 
-  <div id="noWallet" class="card" hidden>
-    <p>No wallet detected in this browser. Open this page inside MetaMask's own
-       browser instead — tap below (this relaunches the same link inside MetaMask,
-       where it can actually submit the transaction):</p>
-    <a id="mmLink" class="link" href="#"><button>Open in MetaMask</button></a>
-  </div>
+  <button id="payBtn" class="primary" type="button" hidden>Pay with MetaMask</button>
 
-  <button id="payBtn" hidden>Pay now</button>
+  <div id="noWallet" class="card" hidden>
+    <p>MetaMask is not in this browser. Install the extension, or open this page in MetaMask’s in-app browser:</p>
+    <a id="mmLink" class="link" href="#"><button type="button">Open in MetaMask</button></a>
+  </div>
   <div id="status"></div>
 
 <script src="vendor/ethers.umd.min.js"></script>
@@ -205,35 +206,45 @@ function rememberProvider(p) {
 
 function showPayOrWalletPrompt() {
   renderInvoice();
+  var payBtn = document.getElementById("payBtn");
+  var noWallet = document.getElementById("noWallet");
+  var deepLink = "https://metamask.app.link/dapp/" + location.host + location.pathname + location.search;
+  document.getElementById("mmLink").href = deepLink;
   if (!invoiceReady()) {
+    payBtn.hidden = true;
+    noWallet.hidden = true;
     setStatus("Waiting for an invoice on the kiosk — tap a drink there, then come back.", "err");
     return;
   }
   var eth = injectedProvider();
   if (eth) rememberProvider(eth);
-  var inMetaMask = !!eth || looksLikeMetaMaskBrowser();
-  if (!inMetaMask) {
-    document.getElementById("noWallet").hidden = false;
-    document.getElementById("payBtn").hidden = true;
-    const deepLink = "https://metamask.app.link/dapp/" + location.host + location.pathname + location.search;
-    document.getElementById("mmLink").href = deepLink;
-    setStatus("");
+  payBtn.hidden = false;
+  payBtn.textContent = "Pay with MetaMask";
+  if (eth || looksLikeMetaMaskBrowser()) {
+    noWallet.hidden = true;
+    setStatus(eth ? "MetaMask is ready. Tap Pay and confirm in the extension." : "Connecting to MetaMask…", "ok");
   } else {
-    document.getElementById("noWallet").hidden = true;
-    document.getElementById("payBtn").hidden = false;
-    setStatus(eth ? "" : "Connecting to MetaMask…");
+    noWallet.hidden = false;
+    setStatus("No wallet yet — tap Pay anyway if MetaMask is installed, or open it below.");
   }
 }
 
 function watchForWallet() {
   function onFound(p) {
-    rememberProvider(p || injectedProvider());
+    var provider = p && p.request ? p : (p && p.detail && p.detail.provider) || injectedProvider();
+    rememberProvider(provider);
     showPayOrWalletPrompt();
   }
   window.addEventListener("ethereum#initialized", function () { onFound(window.ethereum); }, { once: true });
   window.addEventListener("eip6963:announceProvider", function (event) {
     var d = event.detail || {};
-    onFound(d.provider);
+    var info = d.info || {};
+    var provider = d.provider;
+    if (provider && (info.rdns === "io.metamask" || /metamask/i.test(info.name || "") || provider.isMetaMask)) {
+      onFound(provider);
+    } else if (provider && !ETH) {
+      onFound(provider);
+    }
   });
   try { window.dispatchEvent(new Event("eip6963:requestProvider")); } catch (e) {}
   if (injectedProvider()) {

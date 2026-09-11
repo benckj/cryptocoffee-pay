@@ -120,19 +120,101 @@ const OPERATOR = "addr_test1qp3qttth22tt4szen0qguagesr8zyqdtaqwgavltm45etpgu9fm8
   link.hidden = false;
   window.__ccInvoice = { payTo, amount, symbol, adaAmt };
 })();
+
+function setHint(text, cls) {
+  const el = document.getElementById("status");
+  el.textContent = text;
+  el.className = cls || "";
+}
+
+function findLace() {
+  const c = window.cardano;
+  if (!c) return null;
+  if (c.lace && typeof c.lace.enable === "function") return { name: "lace", api: c.lace };
+  for (const name of Object.keys(c)) {
+    const w = c[name];
+    if (w && typeof w.enable === "function") return { name, api: w };
+  }
+  return null;
+}
+
+function waitFor(fn, ms) {
+  return new Promise((resolve) => {
+    const found = fn();
+    if (found) {
+      resolve(found);
+      return;
+    }
+    const started = Date.now();
+    const t = setInterval(() => {
+      const v = fn();
+      if (v || Date.now() - started >= ms) {
+        clearInterval(t);
+        resolve(v || null);
+      }
+    }, 80);
+  });
+}
+
+function paintLaceStatus() {
+  const el = document.getElementById("laceDisplay");
+  const found = findLace();
+  const copyBtn = document.getElementById("copyBtn");
+  const laceUri = document.getElementById("laceUri");
+  const laceBtn = document.getElementById("laceBtn");
+  if (found) {
+    el.textContent = found.name + " ready";
+    laceBtn.hidden = false;
+    if (!document.getElementById("status").textContent || document.getElementById("status").dataset.kind === "detect") {
+      setHint("Lace is ready. Tap Pay with Lace and confirm in the extension.", "ok");
+      document.getElementById("status").dataset.kind = "detect";
+    }
+  } else {
+    el.textContent = "not in this browser";
+    copyBtn.hidden = false;
+    laceUri.hidden = false;
+    if (!document.getElementById("status").textContent || document.getElementById("status").dataset.kind === "detect") {
+      setHint("Open this page in Chrome with UZH Lace to pay here, or copy the address and send 1 UZHADA.", "");
+      document.getElementById("status").dataset.kind = "detect";
+    }
+  }
+}
+
 document.getElementById("copyBtn").addEventListener("click", async () => {
   const payTo = (window.__ccInvoice && window.__ccInvoice.payTo) || document.getElementById("payToDisplay").textContent;
   const adaAmt = (window.__ccInvoice && window.__ccInvoice.adaAmt) || "1";
   try {
     await navigator.clipboard.writeText(payTo.trim());
-    document.getElementById("status").textContent =
-      "Address copied. In Lace: Send → paste → " + adaAmt + " UZHADA → no memo.";
-    document.getElementById("status").className = "ok";
+    setHint("Address copied. In Lace: Send → paste → " + adaAmt + " UZHADA → no memo.", "ok");
+    document.getElementById("status").dataset.kind = "copy";
   } catch {
-    document.getElementById("status").textContent = "Select the address above and copy it.";
-    document.getElementById("status").className = "err";
+    setHint("Select the address above and copy it.", "err");
   }
 });
+
+document.getElementById("laceBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("laceBtn");
+  btn.disabled = true;
+  document.getElementById("status").dataset.kind = "pay";
+  setHint("Opening Lace…");
+  try {
+    const found = findLace() || await waitFor(findLace, 4000);
+    if (!found) {
+      throw new Error("UZH Lace is not in this browser. Open this page in Chrome with the unpacked UZH Lace extension.");
+    }
+    window.__ccLaceApi = await found.api.enable();
+    setHint("Building the 1 UZHADA send…");
+    const send = window.__ccPayWithLace || await waitFor(() => window.__ccPayWithLace, 45000);
+    if (!send) throw new Error("Cardano library did not load. Reload and try again.");
+    await send();
+  } catch (err) {
+    setHint((err && err.message) || String(err), "err");
+    btn.disabled = false;
+  }
+});
+
+paintLaceStatus();
+setInterval(paintLaceStatus, 400);
 </script>
 <script type="module">
 import "./vendor/cardano-bundle.js?v=4";
@@ -234,14 +316,9 @@ function refreshLaceHint() {
   const found = cip30Wallet();
   if (found) {
     el.textContent = found.name + " ready";
-    setStatus("Tap Pay with Lace. Confirm 1 UZHADA in the extension. No extra fields.", "ok");
     return true;
   }
   el.textContent = "not in this browser";
-  setStatus(
-    "Open this page in Chrome with UZH Lace, or copy the address and Send 1 UZHADA there (blank memo).",
-    ""
-  );
   return false;
 }
 
@@ -343,11 +420,13 @@ async function pingNetwork() {
     el.textContent = "slot " + b.slot + " · epoch " + b.epoch;
   } catch (err) {
     el.textContent = "unreachable";
-    setStatus(
-      "Indexer unreachable — Pay with Lace may fail. Copy the address and send 1 UZHADA in Lace instead.\n" +
-        friendlyError(err),
-      "err"
-    );
+    if (!cip30Wallet()) {
+      setStatus(
+        "Indexer unreachable — Pay with Lace may fail. Copy the address and send 1 UZHADA in Lace instead.\n" +
+          friendlyError(err),
+        "err"
+      );
+    }
   }
 }
 
@@ -386,64 +465,38 @@ async function assemblePay(lovelace) {
 
 async function pay() {
   if (!invoiceReady()) {
-    setStatus("No invoice yet. Tap UZHADA on the kiosk first.", "err");
-    return;
+    throw new Error("No invoice yet. Tap UZHADA on the kiosk first.");
   }
   if (!lucid) {
-    setStatus("Connect Lace first.", "err");
-    return;
+    throw new Error("Connect Lace first.");
   }
-  const payBtn = document.getElementById("payBtn");
-  const laceBtn = document.getElementById("laceBtn");
-  payBtn.disabled = true;
-  laceBtn.disabled = true;
   setStatus("Ask Lace to sign a plain 1 UZHADA send…");
-  try {
-    const signed = await assemblePay(BigInt(AMOUNT));
-    setStatus("Submitting to UZH Cardano…");
-    const txHash = await signed.submit();
-    setStatus("Paid. Go back to the kiosk.\n" + txHash, "ok");
-  } catch (err) {
-    setStatus(
-      "Lace did not send. Copy the address and use Send in Lace: " +
-        adaAmount() +
-        " UZHADA, blank memo.\n" +
-        friendlyError(err),
-      "err"
-    );
-    payBtn.disabled = false;
-    laceBtn.disabled = false;
-  }
+  const signed = await assemblePay(BigInt(AMOUNT));
+  setStatus("Submitting to UZH Cardano…");
+  const txHash = await signed.submit();
+  setStatus("Paid. Go back to the kiosk.\n" + txHash, "ok");
 }
 
 async function payWithLace() {
   const found = cip30Wallet();
-  if (!found) {
-    refreshLaceHint();
-    return;
+  const api = window.__ccLaceApi || (found && await found.api.enable());
+  if (!api) {
+    throw new Error("UZH Lace is not in this browser.");
   }
-  const laceBtn = document.getElementById("laceBtn");
-  laceBtn.disabled = true;
-  setStatus("Opening " + found.name + "…");
+  window.__ccLaceApi = api;
+  await showWallet(await connectFromCip30(api));
+  await pay();
+}
+window.__ccPayWithLace = payWithLace;
+
+document.getElementById("unlockBtn").addEventListener("click", unlock);
+document.getElementById("payBtn").addEventListener("click", async () => {
   try {
-    const api = await found.api.enable();
-    await showWallet(await connectFromCip30(api));
     await pay();
   } catch (err) {
-    setStatus(
-      "Could not open Lace. Copy the address and send " +
-        adaAmount() +
-        " UZHADA yourself (no memo).\n" +
-        friendlyError(err),
-      "err"
-    );
-    laceBtn.disabled = false;
+    setStatus(friendlyError(err), "err");
   }
-}
-
-document.getElementById("laceBtn").addEventListener("click", payWithLace);
-document.getElementById("unlockBtn").addEventListener("click", unlock);
-document.getElementById("payBtn").addEventListener("click", pay);
+});
 document.getElementById("refreshBtn").addEventListener("click", async () => {
   if (!lucid) return;
   setStatus("Refreshing…");
