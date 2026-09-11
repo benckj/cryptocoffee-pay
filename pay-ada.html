@@ -74,7 +74,7 @@
   <div class="card" id="invoiceCard">
     <div class="amount" id="amountDisplay">1 UZHADA</div>
     <p>Pay to (UZH Cardano)</p>
-    <div class="addr-box" id="payToDisplay">—</div>
+    <div class="addr-box" id="payToDisplay">addr_test1qp3qttth22tt4szen0qguagesr8zyqdtaqwgavltm45etpgu9fm8v465rswcyn53npgk3lswtqzgtkp2aynv97rayxjqel2ewq</div>
     <button class="ghost" id="copyBtn" type="button">Copy address</button>
     <button class="primary" id="laceBtn" type="button">Pay with Lace</button>
     <a class="btn ghost" id="laceUri" hidden>Open Lace send</a>
@@ -103,6 +103,37 @@
   </div>
   <div id="status"></div>
 
+<script>
+const OPERATOR = "addr_test1qp3qttth22tt4szen0qguagesr8zyqdtaqwgavltm45etpgu9fm8v465rswcyn53npgk3lswtqzgtkp2aynv97rayxjqel2ewq";
+(function paintInvoice() {
+  const params = new URLSearchParams(location.search);
+  const payTo = (params.get("addr") || params.get("address") || OPERATOR).trim() || OPERATOR;
+  const amount = (params.get("amount") || "1000000").replace(/_/g, "") || "1000000";
+  const symbol = params.get("symbol") || "UZHADA";
+  const n = Number(amount) / 1e6;
+  const pretty = (Number.isInteger(n) ? String(n) : n.toFixed(6).replace(/0+$/, "").replace(/\.$/, "")) + " " + symbol;
+  document.getElementById("amountDisplay").textContent = pretty;
+  document.getElementById("payToDisplay").textContent = payTo;
+  const link = document.getElementById("laceUri");
+  const adaAmt = Number.isInteger(n) ? String(n) : n.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+  link.href = "web+cardano:" + payTo + "?amount=" + adaAmt;
+  link.hidden = false;
+  window.__ccInvoice = { payTo, amount, symbol, adaAmt };
+})();
+document.getElementById("copyBtn").addEventListener("click", async () => {
+  const payTo = (window.__ccInvoice && window.__ccInvoice.payTo) || document.getElementById("payToDisplay").textContent;
+  const adaAmt = (window.__ccInvoice && window.__ccInvoice.adaAmt) || "1";
+  try {
+    await navigator.clipboard.writeText(payTo.trim());
+    document.getElementById("status").textContent =
+      "Address copied. In Lace: Send → paste → " + adaAmt + " UZHADA → no memo.";
+    document.getElementById("status").className = "ok";
+  } catch {
+    document.getElementById("status").textContent = "Select the address above and copy it.";
+    document.getElementById("status").className = "err";
+  }
+});
+</script>
 <script type="module">
 import "./vendor/cardano-bundle.js?v=4";
 
@@ -410,14 +441,6 @@ async function payWithLace() {
   }
 }
 
-document.getElementById("copyBtn").addEventListener("click", async () => {
-  try {
-    await navigator.clipboard.writeText(PAY_TO);
-    setStatus("Address copied. In Lace: Send → paste → " + adaAmount() + " UZHADA → no memo.", "ok");
-  } catch {
-    setStatus("Could not copy. Select the address above and copy it.", "err");
-  }
-});
 document.getElementById("laceBtn").addEventListener("click", payWithLace);
 document.getElementById("unlockBtn").addEventListener("click", unlock);
 document.getElementById("payBtn").addEventListener("click", pay);
