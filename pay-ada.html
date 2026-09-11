@@ -5,20 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0033ad">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="UZHADA">
 <title>CryptoCoffee — UZHADA</title>
 <link rel="manifest" href="pay-ada-manifest.json">
 <link rel="icon" href="assets/uzh-cardano-coin.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="assets/uzh-cardano-coin.svg">
 <style>
   :root {
     --bg: #17130f; --panel: #1f1a15; --ink: #f3ede4; --ink-dim: #a89a89;
-    --copper: #e2924f; --ada: #6ea8ff; --success: #6fb98f; --warn: #d97757;
-    --border: #332a20;
+    --ada: #6ea8ff; --success: #6fb98f; --warn: #d97757; --border: #332a20;
   }
   * { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  html { -webkit-text-size-adjust: 100%; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
     font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -38,25 +35,32 @@
   .row { display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--ink-dim); gap: 1rem; }
   .row b { color: var(--ink); font-weight: 500; text-align: right; }
   p { margin: 0; font-size: 0.92rem; line-height: 1.45; color: var(--ink-dim); }
-  textarea, input[type="text"] {
+  textarea {
     width: 100%; font: inherit; font-size: 1rem; padding: 0.75rem;
     border-radius: 10px; border: 1px solid var(--border);
-    background: #140f0c; color: var(--ink);
+    background: #140f0c; color: var(--ink); min-height: 6.5rem; resize: vertical;
   }
-  textarea { min-height: 6.5rem; resize: vertical; }
   label.remember { display: flex; gap: 0.55rem; align-items: center; font-size: 0.88rem; color: var(--ink-dim); }
-  button {
+  button, a.btn {
     font: inherit; font-size: 1rem; padding: 0.9rem 1rem; border-radius: 10px;
     border: 1px solid var(--ada); background: transparent; color: var(--ada);
-    cursor: pointer; font-weight: 600;
+    cursor: pointer; font-weight: 600; text-align: center; text-decoration: none;
   }
-  button.primary { background: #0033ad; border-color: #0033ad; color: #fff; }
+  button.primary, a.btn.primary { background: #0033ad; border-color: #0033ad; color: #fff; }
   button:disabled { opacity: 0.5; cursor: default; }
-  button.ghost { border-color: var(--border); color: var(--ink-dim); }
+  button.ghost, a.btn.ghost { border-color: var(--border); color: var(--ink-dim); }
   #status { font-size: 0.9rem; line-height: 1.5; white-space: pre-wrap; }
   #status.ok { color: var(--success); }
   #status.err { color: var(--warn); }
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
+  .addr-box {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem; line-height: 1.45; word-break: break-all;
+    background: #140f0c; border: 1px solid var(--border); border-radius: 10px;
+    padding: 0.75rem; color: var(--ink);
+  }
+  details { display: grid; gap: 0.55rem; }
+  summary { cursor: pointer; color: var(--ink-dim); font-size: 0.88rem; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -64,20 +68,16 @@
   <header>
     <img class="brand-logo" src="assets/uzh-cardano-coin.svg" alt="UZH Cardano" width="128" height="128">
     <h1>Pay with UZHADA</h1>
-    <p>Same 24 words as UZH Lace. This page never talks to the coffee machine — only to the UZH Cardano indexer. Campus chain only; never a mainnet seed.</p>
+    <p>Send <b>1 UZHADA</b> in UZH Lace. No memo, no datum, no extra fields — a normal send is enough.</p>
   </header>
 
-  <div class="card" id="invoiceCard" hidden>
-    <div class="amount" id="amountDisplay">—</div>
-    <div class="row"><span>Pay to</span><b class="mono" id="payToDisplay">—</b></div>
-    <div class="row"><span>Network</span><b>UZH Cardano</b></div>
-  </div>
-
-  <div class="card" id="unlockCard">
-    <p>Restore the recovery phrase from the UZH Lace Chrome wallet (the unzipped lab wallet, not the Play Store app).</p>
-    <textarea id="seed" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="word1 word2 … word24"></textarea>
-    <label class="remember"><input type="checkbox" id="remember"> Keep unlocked on this phone</label>
-    <button class="primary" id="unlockBtn">Unlock</button>
+  <div class="card" id="invoiceCard">
+    <div class="amount" id="amountDisplay">1 UZHADA</div>
+    <p>Pay to (UZH Cardano)</p>
+    <div class="addr-box" id="payToDisplay">—</div>
+    <button class="ghost" id="copyBtn" type="button">Copy address</button>
+    <button class="primary" id="laceBtn" type="button">Pay with Lace</button>
+    <a class="btn ghost" id="laceUri" hidden>Open Lace send</a>
   </div>
 
   <div class="card" id="walletCard" hidden>
@@ -89,25 +89,30 @@
     <button class="ghost" id="forgetBtn">Forget this phone</button>
   </div>
 
-  <div class="card" id="installCard" hidden>
-    <p id="installHint">Scan the kiosk QR (or open this page from it). Same 24 words as the unzipped UZH Lace lab wallet — not the Play Store app.</p>
-    <button id="installBtn" hidden>Add to Home Screen</button>
-  </div>
+  <details class="card" id="unlockCard">
+    <summary>Pay with recovery phrase instead</summary>
+    <p>Only the unzipped UZH Lace lab wallet — never a Play Store or mainnet seed.</p>
+    <textarea id="seed" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="word1 word2 … word24"></textarea>
+    <label class="remember"><input type="checkbox" id="remember"> Keep unlocked on this phone</label>
+    <button class="ghost" id="unlockBtn">Unlock</button>
+  </details>
 
   <div class="card">
     <div class="row"><span>Indexer</span><b id="netDisplay">loading library…</b></div>
+    <div class="row"><span>Lace</span><b id="laceDisplay">checking…</b></div>
   </div>
   <div id="status"></div>
 
 <script type="module">
-import "./vendor/cardano-bundle.js?v=3";
+import "./vendor/cardano-bundle.js?v=4";
 
 const SEED_KEY = "cryptocoffee.uzhada.seed";
+const OPERATOR = "addr_test1qp3qttth22tt4szen0qguagesr8zyqdtaqwgavltm45etpgu9fm8v465rswcyn53npgk3lswtqzgtkp2aynv97rayxjqel2ewq";
 const YACI_HTTP = "http://130.60.24.200:8080/api/v1";
 const YACI_HTTPS = "https://realty-keyword-campbell-conclude.trycloudflare.com/api/v1";
 let params = new URLSearchParams(location.search);
-let PAY_TO = "";
-let AMOUNT = "";
+let PAY_TO = OPERATOR;
+let AMOUNT = "1000000";
 let SYMBOL = "UZHADA";
 let SESSION = "";
 let MACHINE = "bcc-common-room-01";
@@ -116,8 +121,8 @@ let REFUND_DELAY_MS = 30 * 60 * 1000;
 
 function applyInvoiceSearch(search) {
   params = search instanceof URLSearchParams ? search : new URLSearchParams(search);
-  PAY_TO = (params.get("addr") || params.get("address") || "").trim();
-  AMOUNT = (params.get("amount") || "").replace(/_/g, "");
+  PAY_TO = (params.get("addr") || params.get("address") || OPERATOR).trim() || OPERATOR;
+  AMOUNT = (params.get("amount") || "1000000").replace(/_/g, "") || "1000000";
   SYMBOL = params.get("symbol") || "UZHADA";
   SESSION = (params.get("session") || "").trim();
   MACHINE = (params.get("machine") || "bcc-common-room-01").trim();
@@ -152,13 +157,12 @@ function fmtAda(lovelace) {
   if (!Number.isFinite(n)) return String(lovelace) + " lovelace";
   return (Number.isInteger(n) ? String(n) : n.toFixed(6).replace(/0+$/, "").replace(/\.$/, "")) + " " + SYMBOL;
 }
-function shortAddr(v) {
-  if (!v) return "—";
-  return v.length > 20 ? v.slice(0, 10) + "…" + v.slice(-8) : v;
+function adaAmount() {
+  const n = Number(AMOUNT) / 1e6;
+  return Number.isInteger(n) ? String(n) : n.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
 }
 
 let lucid = null;
-let deferredInstall = null;
 
 function ada() {
   const api = window.CryptoCoffeeAda;
@@ -171,18 +175,48 @@ function invoiceReady() {
 }
 
 function showInvoice() {
+  document.getElementById("invoiceCard").hidden = !invoiceReady();
   if (!invoiceReady()) return;
-  document.getElementById("invoiceCard").hidden = false;
   document.getElementById("amountDisplay").textContent = fmtAda(AMOUNT);
-  document.getElementById("payToDisplay").textContent = shortAddr(PAY_TO);
+  document.getElementById("payToDisplay").textContent = PAY_TO;
+  const uri = "web+cardano:" + PAY_TO + "?amount=" + adaAmount();
+  const link = document.getElementById("laceUri");
+  link.href = uri;
+  link.hidden = false;
   const payBtn = document.getElementById("payBtn");
   if (lucid) payBtn.hidden = false;
 }
 
+function cip30Wallet() {
+  const c = window.cardano;
+  if (!c) return null;
+  if (c.lace && typeof c.lace.enable === "function") return { name: "lace", api: c.lace };
+  for (const name of Object.keys(c)) {
+    const w = c[name];
+    if (w && typeof w.enable === "function") return { name, api: w };
+  }
+  return null;
+}
+
+function refreshLaceHint() {
+  const el = document.getElementById("laceDisplay");
+  const found = cip30Wallet();
+  if (found) {
+    el.textContent = found.name + " ready";
+    setStatus("Tap Pay with Lace. Confirm 1 UZHADA in the extension. No extra fields.", "ok");
+    return true;
+  }
+  el.textContent = "not in this browser";
+  setStatus(
+    "Open this page in Chrome with UZH Lace, or copy the address and Send 1 UZHADA there (blank memo).",
+    ""
+  );
+  return false;
+}
+
 async function followKioskInvoice() {
-  if (invoiceReady()) return;
   if (location.hostname.endsWith("github.io")) return;
-  setStatus("Waiting for the kiosk — tap a drink, then UZHADA.");
+  if (params.get("addr") || params.get("session")) return;
   for (;;) {
     try {
       const res = await fetch("/status.json?ts=" + Date.now(), { cache: "no-store" });
@@ -194,7 +228,7 @@ async function followKioskInvoice() {
         if (invoiceReady()) {
           history.replaceState({}, "", location.pathname + "?" + query);
           showInvoice();
-          setStatus("Invoice from the kiosk. Unlock and pay " + fmtAda(AMOUNT) + ".", "ok");
+          setStatus("Invoice from the kiosk. Send " + fmtAda(AMOUNT) + " in Lace.", "ok");
           return;
         }
       }
@@ -218,10 +252,17 @@ function forgetSeed() {
   localStorage.removeItem(SEED_KEY);
 }
 
-async function connect(phrase) {
+async function connectFromSeed(phrase) {
   const { Lucid, YaciProvider, UZH_SLOT, NETWORK } = ada();
   const instance = await Lucid(new YaciProvider(indexerBase()), NETWORK, { slotConfig: UZH_SLOT });
   instance.selectWallet.fromSeed(phrase);
+  return instance;
+}
+
+async function connectFromCip30(walletApi) {
+  const { Lucid, YaciProvider, UZH_SLOT, NETWORK } = ada();
+  const instance = await Lucid(new YaciProvider(indexerBase()), NETWORK, { slotConfig: UZH_SLOT });
+  instance.selectWallet.fromAPI(walletApi);
   return instance;
 }
 
@@ -237,7 +278,6 @@ async function lovelaceOf(instance, address) {
 async function showWallet(instance) {
   lucid = instance;
   const address = await addressOf(instance);
-  document.getElementById("unlockCard").hidden = true;
   document.getElementById("walletCard").hidden = false;
   document.getElementById("addrDisplay").textContent = address;
   document.getElementById("payBtn").hidden = !invoiceReady();
@@ -251,15 +291,9 @@ async function showWallet(instance) {
 }
 
 function mixedContentHelp() {
-  const httpsRpc = "https://130.60.24.200/api/v1";
   return (
-    "Phones cannot reach the coffee Pi. This page talks only to the UZH Cardano indexer:\n" +
-    indexerBase() +
-    "\n\nThis pay page is HTTPS, so the browser blocks that HTTP indexer (mixed content). " +
-    "Two ways to unblock it, neither of which is the Pi:\n" +
-    "1. Cardano TAs: Traefik is already on https://130.60.24.200:443 with no route. Point it at Yaci :8080, then reopen with &rpc=" +
-    httpsRpc +
-    "\n2. Drop this folder onto the indexer host's HTTP nginx and open http://staking.uzhcardano.ifi.uzh.ch/…/pay-ada.html (HTTP page → HTTP indexer is allowed)."
+    "This pay page is HTTPS, so the browser blocks the HTTP indexer.\n" +
+    "You can still copy the address and send 1 UZHADA in Lace."
   );
 }
 
@@ -278,8 +312,11 @@ async function pingNetwork() {
     el.textContent = "slot " + b.slot + " · epoch " + b.epoch;
   } catch (err) {
     el.textContent = "unreachable";
-    const extra = location.protocol === "https:" ? "\n\n" + mixedContentHelp() : "";
-    setStatus("Cannot reach UZH Cardano indexer.\n" + friendlyError(err) + extra, "err");
+    setStatus(
+      "Indexer unreachable — Pay with Lace may fail. Copy the address and send 1 UZHADA in Lace instead.\n" +
+        friendlyError(err),
+      "err"
+    );
   }
 }
 
@@ -297,7 +334,7 @@ async function unlock() {
     walletFromSeed(phrase, { network: NETWORK, addressType: "Base", accountIndex: 0 });
     persistSeed(phrase, remember);
     document.getElementById("seed").value = "";
-    await showWallet(await connect(phrase));
+    await showWallet(await connectFromSeed(phrase));
     setStatus("Unlocked. This is campus UZHADA only.", "ok");
   } catch (err) {
     setStatus("Could not unlock: " + friendlyError(err), "err");
@@ -306,34 +343,11 @@ async function unlock() {
   }
 }
 
-function utf8Hex(text) {
-  return [...new TextEncoder().encode(text)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
 async function assemblePay(lovelace) {
   const validTo = DEADLINE_S > 0 ? DEADLINE_S * 1000 : Date.now() + 5 * 60 * 1000;
-  let builder = lucid.newTx();
-  if (SESSION) {
-    const { Data, Constr, getAddressDetails } = ada();
-    const payer = getAddressDetails(await lucid.wallet().address()).paymentCredential.hash;
-    const datum = Data.to(
-      new Constr(0, [
-        utf8Hex(SESSION),
-        utf8Hex(MACHINE),
-        BigInt(AMOUNT),
-        BigInt(Date.now() + REFUND_DELAY_MS),
-        payer,
-      ])
-    );
-    builder = builder.pay.ToAddressWithData(
-      PAY_TO,
-      { kind: "inline", value: datum },
-      { lovelace }
-    );
-  } else {
-    builder = builder.pay.ToAddress(PAY_TO, { lovelace });
-  }
-  return builder
+  return lucid
+    .newTx()
+    .pay.ToAddress(PAY_TO, { lovelace })
     .validTo(validTo)
     .complete({ localUPLCEval: false })
     .then((tx) => tx.sign.withWallet().complete());
@@ -341,38 +355,70 @@ async function assemblePay(lovelace) {
 
 async function pay() {
   if (!invoiceReady()) {
-    setStatus("No invoice yet. Leave this page open, then tap UZHADA on the kiosk.", "err");
+    setStatus("No invoice yet. Tap UZHADA on the kiosk first.", "err");
     return;
   }
   if (!lucid) {
-    setStatus("Unlock the wallet first.", "err");
+    setStatus("Connect Lace first.", "err");
     return;
   }
   const payBtn = document.getElementById("payBtn");
+  const laceBtn = document.getElementById("laceBtn");
   payBtn.disabled = true;
-  setStatus("Building transaction…");
+  laceBtn.disabled = true;
+  setStatus("Ask Lace to sign a plain 1 UZHADA send…");
   try {
-    const listed = BigInt(AMOUNT);
-    let send = listed;
-    let signed;
-    try {
-      signed = await assemblePay(send);
-    } catch (err) {
-      if (!SESSION) throw err;
-      send = listed > 1_250_000n ? listed : 1_250_000n;
-      if (send === listed) throw err;
-      setStatus("Min UTxO is above 1 ADA — sending " + fmtAda(send.toString()) + "…");
-      signed = await assemblePay(send);
-    }
+    const signed = await assemblePay(BigInt(AMOUNT));
     setStatus("Submitting to UZH Cardano…");
     const txHash = await signed.submit();
     setStatus("Paid. Go back to the kiosk.\n" + txHash, "ok");
   } catch (err) {
-    setStatus("Error: " + friendlyError(err), "err");
+    setStatus(
+      "Lace did not send. Copy the address and use Send in Lace: " +
+        adaAmount() +
+        " UZHADA, blank memo.\n" +
+        friendlyError(err),
+      "err"
+    );
     payBtn.disabled = false;
+    laceBtn.disabled = false;
   }
 }
 
+async function payWithLace() {
+  const found = cip30Wallet();
+  if (!found) {
+    refreshLaceHint();
+    return;
+  }
+  const laceBtn = document.getElementById("laceBtn");
+  laceBtn.disabled = true;
+  setStatus("Opening " + found.name + "…");
+  try {
+    const api = await found.api.enable();
+    await showWallet(await connectFromCip30(api));
+    await pay();
+  } catch (err) {
+    setStatus(
+      "Could not open Lace. Copy the address and send " +
+        adaAmount() +
+        " UZHADA yourself (no memo).\n" +
+        friendlyError(err),
+      "err"
+    );
+    laceBtn.disabled = false;
+  }
+}
+
+document.getElementById("copyBtn").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(PAY_TO);
+    setStatus("Address copied. In Lace: Send → paste → " + adaAmount() + " UZHADA → no memo.", "ok");
+  } catch {
+    setStatus("Could not copy. Select the address above and copy it.", "err");
+  }
+});
+document.getElementById("laceBtn").addEventListener("click", payWithLace);
 document.getElementById("unlockBtn").addEventListener("click", unlock);
 document.getElementById("payBtn").addEventListener("click", pay);
 document.getElementById("refreshBtn").addEventListener("click", async () => {
@@ -389,41 +435,18 @@ document.getElementById("forgetBtn").addEventListener("click", () => {
   forgetSeed();
   lucid = null;
   document.getElementById("walletCard").hidden = true;
-  document.getElementById("unlockCard").hidden = false;
   setStatus("Forgotten on this phone.");
 });
 
-window.addEventListener("beforeinstallprompt", (e) => {
-  e.preventDefault();
-  deferredInstall = e;
-  document.getElementById("installCard").hidden = false;
-  document.getElementById("installBtn").hidden = false;
-});
-document.getElementById("installBtn").addEventListener("click", async () => {
-  if (!deferredInstall) return;
-  deferredInstall.prompt();
-  await deferredInstall.userChoice;
-  deferredInstall = null;
-  document.getElementById("installCard").hidden = true;
-});
-
-const standalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone;
-if (!standalone) {
-  document.getElementById("installCard").hidden = false;
-  if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
-    document.getElementById("installHint").textContent =
-      "Scan the kiosk QR with the Camera app, then open Pay with UZHADA.";
-  }
-}
-
 (async function init() {
-  await pingNetwork();
   showInvoice();
+  refreshLaceHint();
+  await pingNetwork();
   followKioskInvoice();
   const phrase = storedSeed();
   if (!phrase) return;
   try {
-    await showWallet(await connect(phrase));
+    await showWallet(await connectFromSeed(phrase));
   } catch (err) {
     forgetSeed();
     setStatus("Saved phrase could not unlock: " + friendlyError(err), "err");
