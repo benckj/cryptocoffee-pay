@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0033ad">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="UZHADA">
+<title>CryptoCoffee — UZHADA</title>
+<link rel="manifest" href="pay-ada-manifest.json">
+<link rel="icon" href="assets/uzh-cardano-coin.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/uzh-cardano-coin.svg">
+<style>
+  :root {
+    --bg: #17130f; --panel: #1f1a15; --ink: #f3ede4; --ink-dim: #a89a89;
+    --copper: #e2924f; --ada: #6ea8ff; --success: #6fb98f; --warn: #d97757;
+    --border: #332a20;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    padding: 2rem 1.5rem 3rem; display: grid; gap: 1.1rem;
+    width: 100%; max-width: 480px; margin-inline: auto;
+    min-height: 100vh; align-content: start;
+    overflow-wrap: anywhere;
+  }
+  header { display: grid; gap: 0.5rem; justify-items: center; text-align: center; }
+  h1 { font-size: 1.15rem; margin: 0; }
+  .brand-logo { width: min(5.5rem, 32vw); height: auto; }
+  .amount { font-size: 1.55rem; color: var(--ada); font-weight: 650; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1.15rem 1.25rem; display: grid; gap: 0.55rem;
+  }
+  .row { display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--ink-dim); gap: 1rem; }
+  .row b { color: var(--ink); font-weight: 500; text-align: right; }
+  p { margin: 0; font-size: 0.92rem; line-height: 1.45; color: var(--ink-dim); }
+  textarea, input[type="text"] {
+    width: 100%; font: inherit; font-size: 1rem; padding: 0.75rem;
+    border-radius: 10px; border: 1px solid var(--border);
+    background: #140f0c; color: var(--ink);
+  }
+  textarea { min-height: 6.5rem; resize: vertical; }
+  label.remember { display: flex; gap: 0.55rem; align-items: center; font-size: 0.88rem; color: var(--ink-dim); }
+  button {
+    font: inherit; font-size: 1rem; padding: 0.9rem 1rem; border-radius: 10px;
+    border: 1px solid var(--ada); background: transparent; color: var(--ada);
+    cursor: pointer; font-weight: 600;
+  }
+  button.primary { background: #0033ad; border-color: #0033ad; color: #fff; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button.ghost { border-color: var(--border); color: var(--ink-dim); }
+  #status { font-size: 0.9rem; line-height: 1.5; white-space: pre-wrap; }
+  #status.ok { color: var(--success); }
+  #status.err { color: var(--warn); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <header>
+    <img class="brand-logo" src="assets/uzh-cardano-coin.svg" alt="UZH Cardano" width="128" height="128">
+    <h1>Pay with UZHADA</h1>
+    <p>Same 24 words as UZH Lace. This page never talks to the coffee machine — only to the UZH Cardano indexer. Campus chain only; never a mainnet seed.</p>
+  </header>
+
+  <div class="card" id="invoiceCard" hidden>
+    <div class="amount" id="amountDisplay">—</div>
+    <div class="row"><span>Pay to</span><b class="mono" id="payToDisplay">—</b></div>
+    <div class="row"><span>Network</span><b>UZH Cardano</b></div>
+  </div>
+
+  <div class="card" id="unlockCard">
+    <p>Restore the recovery phrase from the UZH Lace Chrome wallet (the unzipped lab wallet, not the Play Store app).</p>
+    <textarea id="seed" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="word1 word2 … word24"></textarea>
+    <label class="remember"><input type="checkbox" id="remember"> Keep unlocked on this phone</label>
+    <button class="primary" id="unlockBtn">Unlock</button>
+  </div>
+
+  <div class="card" id="walletCard" hidden>
+    <div class="row"><span>Your address</span></div>
+    <b class="mono" id="addrDisplay">—</b>
+    <div class="row"><span>Balance</span><b id="balDisplay">…</b></div>
+    <button class="primary" id="payBtn" hidden>Pay now</button>
+    <button class="ghost" id="refreshBtn">Refresh balance</button>
+    <button class="ghost" id="forgetBtn">Forget this phone</button>
+  </div>
+
+  <div class="card" id="installCard" hidden>
+    <p id="installHint">Scan the kiosk QR (or open this page from it). Same 24 words as the unzipped UZH Lace lab wallet — not the Play Store app.</p>
+    <button id="installBtn" hidden>Add to Home Screen</button>
+  </div>
+
+  <div class="card">
+    <div class="row"><span>Indexer</span><b id="netDisplay">loading library…</b></div>
+  </div>
+  <div id="status"></div>
+
+<script type="module">
+import "./vendor/cardano-bundle.js?v=3";
+
+const SEED_KEY = "cryptocoffee.uzhada.seed";
+const YACI_HTTP = "http://130.60.24.200:8080/api/v1";
+const YACI_HTTPS = "https://realty-keyword-campbell-conclude.trycloudflare.com/api/v1";
+let params = new URLSearchParams(location.search);
+let PAY_TO = "";
+let AMOUNT = "";
+let SYMBOL = "UZHADA";
+let SESSION = "";
+let MACHINE = "bcc-common-room-01";
+let DEADLINE_S = 0;
+let REFUND_DELAY_MS = 30 * 60 * 1000;
+
+function applyInvoiceSearch(search) {
+  params = search instanceof URLSearchParams ? search : new URLSearchParams(search);
+  PAY_TO = (params.get("addr") || params.get("address") || "").trim();
+  AMOUNT = (params.get("amount") || "").replace(/_/g, "");
+  SYMBOL = params.get("symbol") || "UZHADA";
+  SESSION = (params.get("session") || "").trim();
+  MACHINE = (params.get("machine") || "bcc-common-room-01").trim();
+  DEADLINE_S = Number(params.get("deadline") || "0");
+  REFUND_DELAY_MS = Number(params.get("refundDelayMs") || String(30 * 60 * 1000));
+}
+applyInvoiceSearch(location.search);
+
+function indexerBase() {
+  const rpc = (params.get("rpc") || "").trim();
+  if (rpc) return rpc.replace(/\/+$/, "");
+  if (location.protocol === "https:") return YACI_HTTPS.replace(/\/+$/, "");
+  return YACI_HTTP.replace(/\/+$/, "");
+}
+
+function httpsPageBlockedFromHttpIndexer() {
+  return location.protocol === "https:" && indexerBase().startsWith("http:");
+}
+
+const statusEl = document.getElementById("status");
+function setStatus(text, cls) {
+  statusEl.textContent = text;
+  statusEl.className = cls || "";
+}
+function friendlyError(err) {
+  if (!err) return "Unknown error";
+  if (typeof err === "string") return err;
+  return err.message || err.toString() || String(err);
+}
+function fmtAda(lovelace) {
+  const n = Number(lovelace) / 1e6;
+  if (!Number.isFinite(n)) return String(lovelace) + " lovelace";
+  return (Number.isInteger(n) ? String(n) : n.toFixed(6).replace(/0+$/, "").replace(/\.$/, "")) + " " + SYMBOL;
+}
+function shortAddr(v) {
+  if (!v) return "—";
+  return v.length > 20 ? v.slice(0, 10) + "…" + v.slice(-8) : v;
+}
+
+let lucid = null;
+let deferredInstall = null;
+
+function ada() {
+  const api = window.CryptoCoffeeAda;
+  if (!api) throw new Error("Cardano bundle failed to load");
+  return api;
+}
+
+function invoiceReady() {
+  return Boolean(PAY_TO && AMOUNT && /^\d+$/.test(AMOUNT) && BigInt(AMOUNT) > 0n);
+}
+
+function showInvoice() {
+  if (!invoiceReady()) return;
+  document.getElementById("invoiceCard").hidden = false;
+  document.getElementById("amountDisplay").textContent = fmtAda(AMOUNT);
+  document.getElementById("payToDisplay").textContent = shortAddr(PAY_TO);
+  const payBtn = document.getElementById("payBtn");
+  if (lucid) payBtn.hidden = false;
+}
+
+async function followKioskInvoice() {
+  if (invoiceReady()) return;
+  if (location.hostname.endsWith("github.io")) return;
+  setStatus("Waiting for the kiosk — tap a drink, then UZHADA.");
+  for (;;) {
+    try {
+      const res = await fetch("/status.json?ts=" + Date.now(), { cache: "no-store" });
+      const data = await res.json();
+      const uri = String(data.payment_uri || "");
+      if (data.status === "awaiting_payment" && uri.includes("pay-ada.html") && uri.includes("?")) {
+        const query = uri.slice(uri.indexOf("?") + 1);
+        applyInvoiceSearch(query);
+        if (invoiceReady()) {
+          history.replaceState({}, "", location.pathname + "?" + query);
+          showInvoice();
+          setStatus("Invoice from the kiosk. Unlock and pay " + fmtAda(AMOUNT) + ".", "ok");
+          return;
+        }
+      }
+    } catch {
+      /* kiosk status.json is only on this Pi */
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+}
+
+function storedSeed() {
+  return sessionStorage.getItem(SEED_KEY) || localStorage.getItem(SEED_KEY) || "";
+}
+function persistSeed(phrase, remember) {
+  sessionStorage.setItem(SEED_KEY, phrase);
+  if (remember) localStorage.setItem(SEED_KEY, phrase);
+  else localStorage.removeItem(SEED_KEY);
+}
+function forgetSeed() {
+  sessionStorage.removeItem(SEED_KEY);
+  localStorage.removeItem(SEED_KEY);
+}
+
+async function connect(phrase) {
+  const { Lucid, YaciProvider, UZH_SLOT, NETWORK } = ada();
+  const instance = await Lucid(new YaciProvider(indexerBase()), NETWORK, { slotConfig: UZH_SLOT });
+  instance.selectWallet.fromSeed(phrase);
+  return instance;
+}
+
+async function addressOf(instance) {
+  return instance.wallet().address();
+}
+
+async function lovelaceOf(instance, address) {
+  const utxos = await instance.utxosAt(address);
+  return utxos.reduce((sum, u) => sum + (u.assets.lovelace || 0n), 0n);
+}
+
+async function showWallet(instance) {
+  lucid = instance;
+  const address = await addressOf(instance);
+  document.getElementById("unlockCard").hidden = true;
+  document.getElementById("walletCard").hidden = false;
+  document.getElementById("addrDisplay").textContent = address;
+  document.getElementById("payBtn").hidden = !invoiceReady();
+  try {
+    const bal = await lovelaceOf(instance, address);
+    document.getElementById("balDisplay").textContent = fmtAda(bal);
+  } catch (err) {
+    document.getElementById("balDisplay").textContent = "could not load";
+    setStatus("Balance error: " + friendlyError(err), "err");
+  }
+}
+
+function mixedContentHelp() {
+  const httpsRpc = "https://130.60.24.200/api/v1";
+  return (
+    "Phones cannot reach the coffee Pi. This page talks only to the UZH Cardano indexer:\n" +
+    indexerBase() +
+    "\n\nThis pay page is HTTPS, so the browser blocks that HTTP indexer (mixed content). " +
+    "Two ways to unblock it, neither of which is the Pi:\n" +
+    "1. Cardano TAs: Traefik is already on https://130.60.24.200:443 with no route. Point it at Yaci :8080, then reopen with &rpc=" +
+    httpsRpc +
+    "\n2. Drop this folder onto the indexer host's HTTP nginx and open http://staking.uzhcardano.ifi.uzh.ch/…/pay-ada.html (HTTP page → HTTP indexer is allowed)."
+  );
+}
+
+async function pingNetwork() {
+  const el = document.getElementById("netDisplay");
+  const base = indexerBase();
+  if (httpsPageBlockedFromHttpIndexer()) {
+    el.textContent = "blocked (HTTPS page + HTTP indexer)";
+    setStatus(mixedContentHelp(), "err");
+    return;
+  }
+  try {
+    const r = await fetch(base + "/blocks/latest");
+    const b = await r.json();
+    if (!r.ok) throw new Error(b.detail || r.status);
+    el.textContent = "slot " + b.slot + " · epoch " + b.epoch;
+  } catch (err) {
+    el.textContent = "unreachable";
+    const extra = location.protocol === "https:" ? "\n\n" + mixedContentHelp() : "";
+    setStatus("Cannot reach UZH Cardano indexer.\n" + friendlyError(err) + extra, "err");
+  }
+}
+
+async function unlock() {
+  const phrase = document.getElementById("seed").value.trim().replace(/\s+/g, " ");
+  const remember = document.getElementById("remember").checked;
+  if (phrase.split(" ").length < 12) {
+    setStatus("Paste the full UZH Lace recovery phrase.", "err");
+    return;
+  }
+  document.getElementById("unlockBtn").disabled = true;
+  setStatus("Deriving the same address UZH Lace uses…");
+  try {
+    const { walletFromSeed, NETWORK } = ada();
+    walletFromSeed(phrase, { network: NETWORK, addressType: "Base", accountIndex: 0 });
+    persistSeed(phrase, remember);
+    document.getElementById("seed").value = "";
+    await showWallet(await connect(phrase));
+    setStatus("Unlocked. This is campus UZHADA only.", "ok");
+  } catch (err) {
+    setStatus("Could not unlock: " + friendlyError(err), "err");
+  } finally {
+    document.getElementById("unlockBtn").disabled = false;
+  }
+}
+
+function utf8Hex(text) {
+  return [...new TextEncoder().encode(text)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function assemblePay(lovelace) {
+  const validTo = DEADLINE_S > 0 ? DEADLINE_S * 1000 : Date.now() + 5 * 60 * 1000;
+  let builder = lucid.newTx();
+  if (SESSION) {
+    const { Data, Constr, getAddressDetails } = ada();
+    const payer = getAddressDetails(await lucid.wallet().address()).paymentCredential.hash;
+    const datum = Data.to(
+      new Constr(0, [
+        utf8Hex(SESSION),
+        utf8Hex(MACHINE),
+        BigInt(AMOUNT),
+        BigInt(Date.now() + REFUND_DELAY_MS),
+        payer,
+      ])
+    );
+    builder = builder.pay.ToAddressWithData(
+      PAY_TO,
+      { kind: "inline", value: datum },
+      { lovelace }
+    );
+  } else {
+    builder = builder.pay.ToAddress(PAY_TO, { lovelace });
+  }
+  return builder
+    .validTo(validTo)
+    .complete({ localUPLCEval: false })
+    .then((tx) => tx.sign.withWallet().complete());
+}
+
+async function pay() {
+  if (!invoiceReady()) {
+    setStatus("No invoice yet. Leave this page open, then tap UZHADA on the kiosk.", "err");
+    return;
+  }
+  if (!lucid) {
+    setStatus("Unlock the wallet first.", "err");
+    return;
+  }
+  const payBtn = document.getElementById("payBtn");
+  payBtn.disabled = true;
+  setStatus("Building transaction…");
+  try {
+    const listed = BigInt(AMOUNT);
+    let send = listed;
+    let signed;
+    try {
+      signed = await assemblePay(send);
+    } catch (err) {
+      if (!SESSION) throw err;
+      send = listed > 1_250_000n ? listed : 1_250_000n;
+      if (send === listed) throw err;
+      setStatus("Min UTxO is above 1 ADA — sending " + fmtAda(send.toString()) + "…");
+      signed = await assemblePay(send);
+    }
+    setStatus("Submitting to UZH Cardano…");
+    const txHash = await signed.submit();
+    setStatus("Paid. Go back to the kiosk.\n" + txHash, "ok");
+  } catch (err) {
+    setStatus("Error: " + friendlyError(err), "err");
+    payBtn.disabled = false;
+  }
+}
+
+document.getElementById("unlockBtn").addEventListener("click", unlock);
+document.getElementById("payBtn").addEventListener("click", pay);
+document.getElementById("refreshBtn").addEventListener("click", async () => {
+  if (!lucid) return;
+  setStatus("Refreshing…");
+  try {
+    await showWallet(lucid);
+    setStatus("");
+  } catch (err) {
+    setStatus(friendlyError(err), "err");
+  }
+});
+document.getElementById("forgetBtn").addEventListener("click", () => {
+  forgetSeed();
+  lucid = null;
+  document.getElementById("walletCard").hidden = true;
+  document.getElementById("unlockCard").hidden = false;
+  setStatus("Forgotten on this phone.");
+});
+
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredInstall = e;
+  document.getElementById("installCard").hidden = false;
+  document.getElementById("installBtn").hidden = false;
+});
+document.getElementById("installBtn").addEventListener("click", async () => {
+  if (!deferredInstall) return;
+  deferredInstall.prompt();
+  await deferredInstall.userChoice;
+  deferredInstall = null;
+  document.getElementById("installCard").hidden = true;
+});
+
+const standalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone;
+if (!standalone) {
+  document.getElementById("installCard").hidden = false;
+  if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
+    document.getElementById("installHint").textContent =
+      "Scan the kiosk QR with the Camera app, then open Pay with UZHADA.";
+  }
+}
+
+(async function init() {
+  await pingNetwork();
+  showInvoice();
+  followKioskInvoice();
+  const phrase = storedSeed();
+  if (!phrase) return;
+  try {
+    await showWallet(await connect(phrase));
+  } catch (err) {
+    forgetSeed();
+    setStatus("Saved phrase could not unlock: " + friendlyError(err), "err");
+  }
+})();
+</script>
+</body>
+</html>
